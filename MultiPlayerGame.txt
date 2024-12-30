@@ -1,0 +1,153 @@
+index.html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multiplayer Online Game</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="login">
+        <h1>Login</h1>
+        <input type="text" id="username" placeholder="Enter your username">
+        <button id="loginBtn">Login</button>
+    </div>
+
+    <div id="game">
+        <h1>Welcome, <span id="playerName"></span>!</h1>
+        <div id="stats">
+            <p>Player Stats: <span id="playerStats"></span></p>
+        </div>
+        <div id="matchmaking">
+            <button id="findMatchBtn">Find Match</button>
+        </div>
+        <div id="gameArea">
+            <p>Game in Progress...</p>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
+
+
+
+style.css
+body {
+    font-family: Arial, sans-serif;
+    margin: 0;
+    padding: 0;
+    background-color: #f4f4f4;
+}
+
+#login, #game {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    flex-direction: column;
+}
+
+#login {
+    display: block;
+}
+
+#game {
+    display: none;
+}
+
+button {
+    padding: 10px 20px;
+    margin: 10px;
+    cursor: pointer;
+}
+
+
+app.js
+const loginBtn = document.getElementById('loginBtn');
+const findMatchBtn = document.getElementById('findMatchBtn');
+const playerNameSpan = document.getElementById('playerName');
+const playerStatsSpan = document.getElementById('playerStats');
+const gameArea = document.getElementById('gameArea');
+
+const socket = new WebSocket('ws://localhost:8080'); // WebSocket connection to backend
+
+// Handle login
+loginBtn.addEventListener('click', () => {
+    const username = document.getElementById('username').value;
+    if (username) {
+        socket.send(JSON.stringify({ type: 'login', username }));
+        document.getElementById('login').style.display = 'none';
+        document.getElementById('game').style.display = 'block';
+        playerNameSpan.textContent = username;
+    }
+});
+
+// Handle matchmaking
+findMatchBtn.addEventListener('click', () => {
+    socket.send(JSON.stringify({ type: 'find_match' }));
+});
+
+// Handle incoming messages from WebSocket (game updates, stats, etc.)
+socket.onmessage = function (event) {
+    const data = JSON.parse(event.data);
+    if (data.type === 'match_found') {
+        gameArea.innerHTML = `<p>Game started with player: ${data.opponent}</p>`;
+    } else if (data.type === 'stats') {
+        playerStatsSpan.textContent = `Wins: ${data.wins}, Losses: ${data.losses}`;
+    }
+};
+
+
+server.js
+const express = require('express');
+const WebSocket = require('ws');
+const app = express();
+const http = require('http').Server(app);
+const wss = new WebSocket.Server({ server: http });
+
+let players = {}; // Store connected players
+let matchmakingQueue = []; // Players waiting for matchmaking
+
+app.use(express.static('public')); // Serve the frontend files
+
+// WebSocket server for real-time communication
+wss.on('connection', (ws) => {
+    let player = null;
+
+    ws.on('message', (message) => {
+        const data = JSON.parse(message);
+
+        if (data.type === 'login') {
+            player = { username: data.username, ws };
+            players[data.username] = player;
+            console.log(`${data.username} logged in`);
+        }
+
+        if (data.type === 'find_match' && player) {
+            matchmakingQueue.push(player);
+            console.log(`${player.username} added to matchmaking queue`);
+
+            // Matchmake if there are two players
+            if (matchmakingQueue.length >= 2) {
+                const player1 = matchmakingQueue.shift();
+                const player2 = matchmakingQueue.shift();
+                player1.ws.send(JSON.stringify({ type: 'match_found', opponent: player2.username }));
+                player2.ws.send(JSON.stringify({ type: 'match_found', opponent: player1.username }));
+            }
+        }
+    });
+
+    ws.on('close', () => {
+        if (player) {
+            delete players[player.username];
+            console.log(`${player.username} disconnected`);
+        }
+    });
+});
+
+// Start the server
+http.listen(8080, () => {
+    console.log('Server is listening on port 8080');
+});
